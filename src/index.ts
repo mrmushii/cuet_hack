@@ -13,6 +13,12 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { timeout } from "hono/timeout";
 import { rateLimiter } from "hono-rate-limiter";
+import {
+  createDownloadQueue,
+  createRedisConnection,
+  getJobStatus,
+  type DownloadJobData,
+} from "./queue.ts";
 
 // Helper for optional URL that treats empty string as undefined
 const optionalUrl = z
@@ -42,6 +48,11 @@ const EnvSchema = z.object({
     .string()
     .default("*")
     .transform((val) => (val === "*" ? "*" : val.split(","))),
+  // Redis Configuration
+  REDIS_HOST: z.string().default("localhost"),
+  REDIS_PORT: z.coerce.number().int().min(1).max(65535).default(6379),
+  REDIS_PASSWORD: z.string().optional(),
+  REDIS_DB: z.coerce.number().int().min(0).max(15).default(0),
   // Download delay simulation (in milliseconds)
   DOWNLOAD_DELAY_MIN_MS: z.coerce.number().int().min(0).default(10000), // 10 seconds
   DOWNLOAD_DELAY_MAX_MS: z.coerce.number().int().min(0).default(200000), // 200 seconds
@@ -57,11 +68,11 @@ const s3Client = new S3Client({
   ...(env.S3_ENDPOINT && { endpoint: env.S3_ENDPOINT }),
   ...(env.S3_ACCESS_KEY_ID &&
     env.S3_SECRET_ACCESS_KEY && {
-      credentials: {
-        accessKeyId: env.S3_ACCESS_KEY_ID,
-        secretAccessKey: env.S3_SECRET_ACCESS_KEY,
-      },
-    }),
+    credentials: {
+      accessKeyId: env.S3_ACCESS_KEY_ID,
+      secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+    },
+  }),
   forcePathStyle: env.S3_FORCE_PATH_STYLE,
 });
 
@@ -488,17 +499,68 @@ const downloadCheckRoute = createRoute({
   },
 });
 
-app.openapi(downloadInitiateRoute, (c) => {
+app.openapi(downloadInitiateRoute, async (c) => {
   const { file_ids } = c.req.valid("json");
   const jobId = crypto.randomUUID();
-  return c.json(
-    {
+
+  // Enqueue job to BullMQ
+  const queue = createDownloadQueue();
+  const redis = createRedisConnection();
+
+  try {
+    const jobData: DownloadJobData = {
       jobId,
-      status: "queued" as const,
-      totalFileIds: file_ids.length,
-    },
-    200,
-  );
+      fileIds: file_ids,
+    };
+
+    await queue.add(jobId, jobData, { jobId });
+
+    // Initialize job status in Redis
+    await redis.hmset(
+      `job:${jobId}`,
+      "jobId",
+      jobId,
+      "status",
+      "queued",
+      "progress",
+      JSON.stringify({ current: 0, total: file_ids.length, percentage: 0 }),
+      "files",
+      JSON.stringify(
+        file_ids.map((fileId: number) => ({
+          fileId,
+          status: "queued",
+          sizeBytes: null,
+        })),
+      ),
+      "createdAt",
+      new Date().toISOString(),
+      "updatedAt",
+      new Date().toISOString(),
+      "completedAt",
+      "",
+      "downloadUrl",
+      "",
+      "error",
+      "",
+    );
+    await redis.expire(`job:${jobId}`, 604800); // 7 days
+
+    await redis.quit();
+    await queue.close();
+
+    return c.json(
+      {
+        jobId,
+        status: "queued" as const,
+        totalFileIds: file_ids.length,
+      },
+      200,
+    );
+  } catch (error) {
+    await redis.quit();
+    await queue.close();
+    throw error;
+  }
 });
 
 app.openapi(downloadCheckRoute, async (c) => {
@@ -616,6 +678,183 @@ app.openapi(downloadStartRoute, async (c) => {
       },
       200,
     );
+  }
+});
+
+// Job Status Route
+const jobStatusRoute = createRoute({
+  method: "get",
+  path: "/v1/jobs/{jobId}/status",
+  tags: ["Jobs"],
+  summary: "Get job status",
+  description: "Retrieves the current status of a download job",
+  request: {
+    params: z.object({
+      jobId: z.string().uuid().openapi({ description: "Job identifier" }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Job status retrieved successfully",
+      content: {
+        "application/json": {
+          schema: z.object({
+            jobId: z.string(),
+            status: z.enum(["queued", "processing", "completed", "failed"]),
+            progress: z.object({
+              current: z.number().int(),
+              total: z.number().int(),
+              percentage: z.number().int(),
+            }),
+            files: z.array(
+              z.object({
+                fileId: z.number().int(),
+                status: z.enum([
+                  "queued",
+                  "processing",
+                  "completed",
+                  "failed",
+                ]),
+                sizeBytes: z.number().int().nullable(),
+              }),
+            ),
+            createdAt: z.string(),
+            updatedAt: z.string(),
+            completedAt: z.string().nullable(),
+            downloadUrl: z.string().nullable(),
+            error: z.string().nullable(),
+          }),
+        },
+      },
+    },
+    404: {
+      description: "Job not found",
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+app.openapi(jobStatusRoute, async (c) => {
+  const { jobId } = c.req.valid("param");
+  const redis = createRedisConnection();
+
+  try {
+    const status = await getJobStatus(redis, jobId);
+    await redis.quit();
+
+    if (!status) {
+      return c.json(
+        {
+          error: "Not Found",
+          message: `Job ${jobId} not found`,
+          requestId: c.get("requestId") as string | undefined,
+        },
+        404,
+      );
+    }
+
+    return c.json(status, 200);
+  } catch (error) {
+    await redis.quit();
+    throw error;
+  }
+});
+
+// Job Download Route
+const jobDownloadRoute = createRoute({
+  method: "get",
+  path: "/v1/jobs/{jobId}/download",
+  tags: ["Jobs"],
+  summary: "Get job download URL",
+  description: "Retrieves the download URL for a completed job",
+  request: {
+    params: z.object({
+      jobId: z.string().uuid().openapi({ description: "Job identifier" }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Download URL retrieved successfully",
+      content: {
+        "application/json": {
+          schema: z.object({
+            jobId: z.string(),
+            downloadUrl: z.string(),
+            expiresAt: z.string(),
+          }),
+        },
+      },
+    },
+    404: {
+      description: "Job not found or not completed",
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+app.openapi(jobDownloadRoute, async (c) => {
+  const { jobId } = c.req.valid("param");
+  const redis = createRedisConnection();
+
+  try {
+    const status = await getJobStatus(redis, jobId);
+    await redis.quit();
+
+    if (!status) {
+      return c.json(
+        {
+          error: "Not Found",
+          message: `Job ${jobId} not found`,
+          requestId: c.get("requestId") as string | undefined,
+        },
+        404,
+      );
+    }
+
+    if (status.status !== "completed") {
+      return c.json(
+        {
+          error: "Not Ready",
+          message: `Job ${jobId} is not completed yet (status: ${status.status})`,
+          requestId: c.get("requestId") as string | undefined,
+        },
+        404,
+      );
+    }
+
+    if (!status.downloadUrl) {
+      return c.json(
+        {
+          error: "No Download URL",
+          message: `Job ${jobId} completed but no download URL available`,
+          requestId: c.get("requestId") as string | undefined,
+        },
+        404,
+      );
+    }
+
+    // Calculate expiry (24 hours from now)
+    const expiresAt = new Date(Date.now() + 86400000).toISOString();
+
+    return c.json(
+      {
+        jobId,
+        downloadUrl: status.downloadUrl,
+        expiresAt,
+      },
+      200,
+    );
+  } catch (error) {
+    await redis.quit();
+    throw error;
   }
 });
 
