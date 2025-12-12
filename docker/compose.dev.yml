@@ -15,6 +15,7 @@ services:
       - NODE_ENV=development
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://delineate-jaeger:4318
       - S3_ENDPOINT=http://delineate-minio:9000
+      - CORS_ORIGINS=http://localhost:5173
     depends_on:
       delineate-jaeger:
         condition: service_started
@@ -22,6 +23,22 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    networks:
+      - delineate-network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend/src:/app/src
+    environment:
+      - VITE_API_URL=http://localhost:3000
+      - VITE_JAEGER_URL=http://localhost:16686
+    depends_on:
+      - delineate-app
     networks:
       - delineate-network
 
@@ -51,17 +68,13 @@ services:
       delineate-minio:
         condition: service_healthy
     entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://delineate-minio:9000 minioadmin minioadmin;
-      mc mb local/downloads --ignore-existing;
-      mc anonymous set download local/downloads;
-      echo 'MinIO bucket initialized successfully';
-      "
+      /bin/sh -c " mc alias set local http://delineate-minio:9000 minioadmin minioadmin; mc mb local/downloads --ignore-existing; mc anonymous set download local/downloads; echo 'MinIO bucket initialized successfully'; "
     networks:
       - delineate-network
 
   delineate-jaeger:
     image: jaegertracing/all-in-one:latest
+    container_name: delineate-jaeger
     ports:
       - "16686:16686"
       - "4318:4318"
