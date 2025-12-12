@@ -8,6 +8,11 @@ RUN npm install
 
 COPY . .
 
+# Create empty .env file for --env-file compatibility
+# Environment variables are injected by Docker Compose
+RUN touch .env
+
 EXPOSE 3000
 
 CMD ["npm", "run", "dev"]
+
