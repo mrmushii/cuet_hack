@@ -12,12 +12,40 @@ services:
     environment:
       - NODE_ENV=production
       - S3_ENDPOINT=http://delineate-minio:9000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http:// delineate-jaeger:4318
     restart: unless-stopped
     depends_on:
       delineate-minio:
         condition: service_healthy
+      delineate-jaeger:
+        condition: service_started
       minio-init:
         condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1));",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - delineate-network
 
@@ -48,6 +76,11 @@ services:
         reservations:
           cpus: "0.5"
           memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - delineate-network
 
@@ -57,12 +90,38 @@ services:
       delineate-minio:
         condition: service_healthy
     entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://delineate-minio:9000 ${S3_ACCESS_KEY_ID:-minioadmin} ${S3_SECRET_ACCESS_KEY:-minioadmin};
-      mc mb local/${S3_BUCKET_NAME:-downloads} --ignore-existing;
-      mc anonymous set download local/${S3_BUCKET_NAME:-downloads};
-      echo 'MinIO bucket initialized successfully';
-      "
+      /bin/sh -c " mc alias set local http://delineate-minio:9000 ${S3_ACCESS_KEY_ID:-minioadmin} ${S3_SECRET_ACCESS_KEY:-minioadmin}; mc mb local/${S3_BUCKET_NAME:-downloads} --ignore-existing; mc anonymous set download local/${S3_BUCKET_NAME:-downloads}; echo 'MinIO bucket initialized successfully'; "
+    networks:
+      - delineate-network
+
+  delineate-jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: delineate-jaeger-prod
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4318:4318" # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_VALUE=/badger/data
+      - BADGER_DIRECTORY_KEY=/badger/key
+    volumes:
+      - jaeger-data:/badger
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - delineate-network
 
@@ -72,3 +131,4 @@ networks:
 
 volumes:
   minio-data:
+  jaeger-data:
