@@ -1,5 +1,11 @@
 # Delineate Hackathon Challenge - CUET Fest 2025
 
+[![CI/CD Pipeline](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/YOUR_USERNAME/YOUR_REPO/workflows/CodeQL/badge.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO/security/code-scanning)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+> **Note**: Replace `YOUR_USERNAME/YOUR_REPO` with your actual GitHub username and repository name in the badge URLs above.
+
 ## The Scenario
 
 This microservice simulates a **real-world file download system** where processing times vary significantly:
