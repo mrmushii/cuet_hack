@@ -44,6 +44,12 @@ export const createRedisConnection = () => {
     password: password ?? undefined,
     db,
     maxRetriesPerRequest: null,
+    connectTimeout: 3000, // 3 second timeout
+    retryStrategy: (times) => {
+      if (times > 1) return null; // Only retry once
+      return 500; // 500ms delay between retries
+    },
+    lazyConnect: true, // Don't connect until first command
   });
 };
 

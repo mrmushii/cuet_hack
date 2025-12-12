@@ -68,11 +68,11 @@ const s3Client = new S3Client({
   ...(env.S3_ENDPOINT && { endpoint: env.S3_ENDPOINT }),
   ...(env.S3_ACCESS_KEY_ID &&
     env.S3_SECRET_ACCESS_KEY && {
-      credentials: {
-        accessKeyId: env.S3_ACCESS_KEY_ID,
-        secretAccessKey: env.S3_SECRET_ACCESS_KEY,
-      },
-    }),
+    credentials: {
+      accessKeyId: env.S3_ACCESS_KEY_ID,
+      secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+    },
+  }),
   forcePathStyle: env.S3_FORCE_PATH_STYLE,
 });
 
@@ -568,12 +568,16 @@ app.openapi(downloadInitiateRoute, async (c) => {
       // Ignore cleanup errors
     }
 
-    // If Redis is unavailable, return mock response for testing
-    if (
-      error instanceof Error &&
-      (error.message.includes("ECONNREFUSED") ||
-        error.message.includes("connect"))
-    ) {
+    // Check if Redis is unavailable
+    const isRedisError =
+      (error instanceof Error &&
+        (error.message.includes("ECONNREFUSED") ||
+          error.message.includes("connect") ||
+          error.message.includes("Redis"))) ||
+      (error as { code?: string }).code === "ECONNREFUSED" ||
+      (error as { name?: string }).name === "AggregateError";
+
+    if (isRedisError) {
       console.warn(
         "[Warning] Redis unavailable, returning mock response for job:",
         jobId,
