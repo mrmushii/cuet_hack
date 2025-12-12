@@ -6,7 +6,9 @@
   },
   "scripts": {
     "dev": "cross-env DOWNLOAD_DELAY_MIN_MS=5000 DOWNLOAD_DELAY_MAX_MS=15000 node --env-file=.env --experimental-transform-types --watch src/index.ts",
+    "dev:worker": "cross-env DOWNLOAD_DELAY_MIN_MS=5000 DOWNLOAD_DELAY_MAX_MS=15000 node --env-file=.env --experimental-transform-types --watch src/worker.ts",
     "start": "cross-env DOWNLOAD_DELAY_MIN_MS=10000 DOWNLOAD_DELAY_MAX_MS=120000 node --env-file=.env --experimental-transform-types src/index.ts",
+    "start:worker": "cross-env DOWNLOAD_DELAY_MIN_MS=10000 DOWNLOAD_DELAY_MAX_MS=120000 node --env-file=.env --experimental-transform-types src/worker.ts",
     "prepare": "husky || true",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
@@ -27,8 +29,11 @@
     "@opentelemetry/sdk-node": "^0.208.0",
     "@opentelemetry/semantic-conventions": "^1.38.0",
     "@scalar/hono-api-reference": "^0.9.28",
+    "bullmq": "^5.34.0",
     "hono": "^4.10.8",
     "hono-rate-limiter": "^0.4.2",
+    "ioredis": "^5.4.2",
+    "ws": "^8.18.0",
     "zod": "^4.1.13"
   },
   "devDependencies": {
@@ -36,6 +41,7 @@
     "@commitlint/config-conventional": "^19.6.0",
     "@hono/eslint-config": "^2.0.3",
     "@types/node": "^24.10.2",
+    "@types/ws": "^8.5.13",
     "cross-env": "^7.0.3",
     "husky": "^9.1.7",
     "lint-staged": "^15.2.11",

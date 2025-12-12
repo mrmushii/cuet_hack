@@ -12,10 +12,14 @@ services:
     environment:
       - NODE_ENV=production
       - S3_ENDPOINT=http://delineate-minio:9000
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http:// delineate-jaeger:4318
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://delineate-jaeger:4318
+      - REDIS_HOST=delineate-redis
+      - REDIS_PORT=6379
     restart: unless-stopped
     depends_on:
       delineate-minio:
+        condition: service_healthy
+      delineate-redis:
         condition: service_healthy
       delineate-jaeger:
         condition: service_started
@@ -125,6 +129,75 @@ services:
     networks:
       - delineate-network
 
+  delineate-redis:
+    image: redis:7-alpine
+    container_name: delineate-redis-prod
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - delineate-network
+
+  delineate-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    command: npm run start:worker
+    env_file:
+      - ../.env
+    environment:
+      - NODE_ENV=production
+      - S3_ENDPOINT=http://delineate-minio:9000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://delineate-jaeger:4318
+      - REDIS_HOST=delineate-redis
+      - REDIS_PORT=6379
+    restart: unless-stopped
+    depends_on:
+      delineate-redis:
+        condition: service_healthy
+      delineate-minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+      replicas: 2
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - delineate-network
+
 networks:
   delineate-network:
     driver: bridge
@@ -132,3 +205,4 @@ networks:
 volumes:
   minio-data:
   jaeger-data:
+  redis-data:
