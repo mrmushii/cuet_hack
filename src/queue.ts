@@ -1,4 +1,4 @@
-import { Queue, Worker, type Job } from "bullmq";
+import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 
 // Type definitions
@@ -19,11 +19,11 @@ export interface JobStatus {
   jobId: string;
   status: "queued" | "processing" | "completed" | "failed";
   progress: JobProgress;
-  files: Array<{
+  files: {
     fileId: number;
     status: "queued" | "processing" | "completed" | "failed";
     sizeBytes: number | null;
-  }>;
+  }[];
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -41,7 +41,7 @@ export const createRedisConnection = () => {
   return new Redis({
     host,
     port,
-    password: password || undefined,
+    password: password ?? undefined,
     db,
     maxRetriesPerRequest: null,
   });
@@ -87,11 +87,13 @@ export const updateJobStatus = async (
   // Convert objects to JSON strings for Redis hash
   const hashData: Record<string, string> = {};
   for (const [k, v] of Object.entries(updatedData)) {
-    if (v === null || v === undefined) continue;
-    hashData[k] = typeof v === "object" ? JSON.stringify(v) : String(v);
+    if (v == null || v === "") continue;
+    hashData[k] = typeof v === "object" ? JSON.stringify(v) : v;
   }
 
-  await redis.hmset(key, hashData);
+  if (Object.keys(hashData).length > 0) {
+    await redis.hmset(key, hashData);
+  }
   await redis.expire(key, 604800); // 7 days TTL
 };
 
@@ -102,24 +104,30 @@ export const getJobStatus = async (
   const key = `job:${jobId}`;
   const data = await redis.hgetall(key);
 
-  if (!data || Object.keys(data).length === 0) {
+  if (Object.keys(data).length === 0) {
     return null;
   }
 
-  // Parse JSON fields
-  const progress = data.progress ? JSON.parse(data.progress) : { current: 0, total: 0, percentage: 0 };
-  const files = data.files ? JSON.parse(data.files) : [];
+  // Parse JSON fields with defaults
+  const progress = data.progress
+    ? (JSON.parse(data.progress) as JobProgress)
+    : { current: 0, total: 0, percentage: 0 };
+  const files = data.files
+    ? (JSON.parse(data.files) as JobStatus["files"])
+    : [];
+
+  const statusValue = data.status as JobStatus["status"] | undefined;
 
   return {
-    jobId: data.jobId ?? jobId,
-    status: (data.status as JobStatus["status"]) ?? "queued",
+    jobId: data.jobId || jobId,
+    status: statusValue ?? "queued",
     progress,
     files,
-    createdAt: data.createdAt ?? new Date().toISOString(),
-    updatedAt: data.updatedAt ?? new Date().toISOString(),
-    completedAt: data.completedAt ?? null,
-    downloadUrl: data.downloadUrl ?? null,
-    error: data.error ?? null,
+    createdAt: data.createdAt || new Date().toISOString(),
+    updatedAt: data.updatedAt || new Date().toISOString(),
+    completedAt: data.completedAt || null,
+    downloadUrl: data.downloadUrl || null,
+    error: data.error || null,
   };
 };
 

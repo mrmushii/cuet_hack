@@ -17,8 +17,8 @@ import {
   createDownloadQueue,
   createRedisConnection,
   getJobStatus,
-  type DownloadJobData,
 } from "./queue.ts";
+import type { DownloadJobData } from "./queue.ts";
 
 // Helper for optional URL that treats empty string as undefined
 const optionalUrl = z
@@ -68,11 +68,11 @@ const s3Client = new S3Client({
   ...(env.S3_ENDPOINT && { endpoint: env.S3_ENDPOINT }),
   ...(env.S3_ACCESS_KEY_ID &&
     env.S3_SECRET_ACCESS_KEY && {
-    credentials: {
-      accessKeyId: env.S3_ACCESS_KEY_ID,
-      secretAccessKey: env.S3_SECRET_ACCESS_KEY,
-    },
-  }),
+      credentials: {
+        accessKeyId: env.S3_ACCESS_KEY_ID,
+        secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+      },
+    }),
   forcePathStyle: env.S3_FORCE_PATH_STYLE,
 });
 
@@ -690,7 +690,7 @@ const jobStatusRoute = createRoute({
   description: "Retrieves the current status of a download job",
   request: {
     params: z.object({
-      jobId: z.string().uuid().openapi({ description: "Job identifier" }),
+      jobId: z.uuid().openapi({ description: "Job identifier" }),
     }),
   },
   responses: {
@@ -709,12 +709,7 @@ const jobStatusRoute = createRoute({
             files: z.array(
               z.object({
                 fileId: z.number().int(),
-                status: z.enum([
-                  "queued",
-                  "processing",
-                  "completed",
-                  "failed",
-                ]),
+                status: z.enum(["queued", "processing", "completed", "failed"]),
                 sizeBytes: z.number().int().nullable(),
               }),
             ),
@@ -773,7 +768,7 @@ const jobDownloadRoute = createRoute({
   description: "Retrieves the download URL for a completed job",
   request: {
     params: z.object({
-      jobId: z.string().uuid().openapi({ description: "Job identifier" }),
+      jobId: z.uuid().openapi({ description: "Job identifier" }),
     }),
   },
   responses: {
