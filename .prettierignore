@@ -1,1 +1,25 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+*.log
+
+# Data and cache
 data/
+.cache/
+
+# Coverage reports
+coverage/
+.nyc_output/
+
+# Docker
+Dockerfile*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
